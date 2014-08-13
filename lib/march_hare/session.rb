@@ -76,7 +76,7 @@ module MarchHare
     end
 
     # @return [Array<MarchHare::Channel>] Channels opened on this connection
-    attr_reader :channels
+    attr_reader :channels, :logger
 
 
     # @private
@@ -99,8 +99,10 @@ module MarchHare
 
       @default_host_selection_strategy = Proc.new { |hosts| hosts.sample }
       @host_selection_strategy         = opts[:host_selection_strategy] || @default_host_selection_strategy
+      @logger = opts[:logger]
 
       if @automatically_recover
+        logger.info("[MarchHare] Adding hook for automatic recovery")
         self.add_automatic_recovery_hook
       end
     end
@@ -198,6 +200,8 @@ module MarchHare
     # Begins automatic connection recovery (typically only used internally
     # to recover from network failures)
     def automatically_recover
+      logger.warn("[MarchHare] Automatic connection recovery started")
+
       ms = @network_recovery_interval * 1000
       # recovering immediately makes little sense. Wait a bit first. MK.
       java.lang.Thread.sleep(ms)
@@ -224,13 +228,16 @@ module MarchHare
       # in the order the user expects and before bindings.
       @channels.sort_by {|id, _| id}.each do |id, ch|
         begin
+          logger.warn("[MarchHare] Attempting to recover channel #{ch}")
           ch.automatically_recover(self, new_connection)
         rescue Exception, java.io.IOException => e
           # TODO: logging
           $stderr.puts e
+          logger.error("[MarchHare] Unable to recover channel #{ch}")
         end
       end
 
+      logger.warn("[MarchHare] Automatic connection recovery ended")
       @connection = new_connection
     end
 
@@ -400,8 +407,10 @@ module MarchHare
     # @private
     def reconnecting_on_network_failures(interval_in_ms, &fn)
       begin
+        logger.warn("[MarchHare] Attempting to reconnect after network failure...")
         fn.call
       rescue IOError, MarchHare::ConnectionRefused, java.io.IOException => e
+        logger.warn("[MarchHare] Could not reconnect now, retrying soon...")
         java.lang.Thread.sleep(interval_in_ms)
 
         retry
